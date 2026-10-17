@@ -1,12 +1,13 @@
 /**
- * QueryShield — logique du popup.
+ * QueryShield — logique du popup (console tactique).
+ *
+ * Sections : etat de la surveillance, page active (logs), audit manuel
+ * (message / site), resultat, quota, historique.
  * Aucun contenu analyse n'est conserve : seuls score, verdict et resume
  * sont memorises pour l'historique local.
  */
 (function () {
   'use strict';
-
-  /* ------------------------------------------------------------ elements */
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -33,24 +34,20 @@
     quotaLine: $('quota-line'),
     history: $('history'),
     protectState: $('protect-state'),
+    protectLabel: $('protect-label'),
+    protectMode: $('protect-mode'),
+    activePage: $('active-page'),
+    activeUrl: $('active-url'),
+    activeBadge: $('active-badge'),
+    activeScore: $('active-score'),
+    activeDetails: $('active-details'),
+    recheckBtn: $('recheck-btn'),
     openOptions: $('open-options'),
   };
 
   const MAX_CHARS = 20000;
   const RING_CIRC = 2 * Math.PI * 52;
-
-  const VERDICTS = {
-    safe:       { label: 'Aucun signal preoccupant',        cls: 'is-safe',    color: '#22c55e' },
-    official:   { label: 'Domaine officiel',                cls: 'is-safe',    color: '#22c55e' },
-    unknown:    { label: 'Non verifie',                     cls: 'is-unknown', color: '#8a94a8' },
-    suspicious: { label: 'Suspect — verifier avant d agir', cls: 'is-warn',   color: '#ffb020' },
-    dangerous:  { label: 'Tres probablement frauduleux',     cls: 'is-danger', color: '#ff3b5c' },
-    phishing:   { label: 'Phishing — ne pas saisir de donnees', cls: 'is-danger', color: '#ff3b5c' },
-  };
-
-  const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
   let channel = 'unknown';
-  let currentTabId = null;
 
   /* ------------------------------------------------------------ helpers */
 
@@ -75,10 +72,118 @@
     els.analyzeBtn.disabled = on;
     els.checkSiteBtn.disabled = on;
     els.auditPageBtn.disabled = on;
+    els.recheckBtn.disabled = on;
   }
 
   function send(message) {
     return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
+  }
+
+  function applyVerdictClasses(el, verdict, score, settings) {
+    const level = QSApi.threatLevel({ verdict, score: score || 0 }, settings || QSApi.DEFAULT_SETTINGS);
+    el.className = 'qs-verdict ' + (
+      level === 'block' ? 'is-block' : level === 'warn' ? 'is-warn' : 'is-safe'
+    );
+    return level;
+  }
+
+  /* ------------------------------------------------------------ surveillance */
+
+  async function renderProtection() {
+    const settings = await QSApi.getSettings();
+    const tabState = await send({ type: 'get-tab-state' });
+
+    if (tabState && tabState.paused) {
+      els.protectState.className = 'qs-dot is-paused';
+      els.protectLabel.textContent = 'Surveillance en pause (quota)';
+    } else if (!settings.protectEnabled) {
+      els.protectState.className = 'qs-dot is-off';
+      els.protectLabel.textContent = 'Surveillance desactivee';
+    } else {
+      els.protectState.className = 'qs-dot is-on';
+      els.protectLabel.textContent = 'Surveillance active · zero-click';
+    }
+    els.protectMode.textContent = settings.blockMode ? 'blocage' : 'avertissement';
+    els.protectMode.className = 'qs-mode' + (settings.blockMode ? '' : ' is-warn-only');
+  }
+
+  /* ------------------------------------------------------------ page active */
+
+  async function renderActivePage() {
+    let tab = null;
+    try {
+      [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    } catch {
+      tab = null;
+    }
+
+    if (!tab || !tab.url || !QSApi.isScannableUrl(tab.url)) {
+      els.activeUrl.textContent = tab && tab.url ? tab.url.replace(/^https?:\/\//, '') : 'aucune page analysable';
+      els.activeBadge.className = 'qs-verdict is-unknown';
+      els.activeBadge.textContent = 'HORS PERIMETRE';
+      els.activeScore.textContent = '—';
+      els.activeScore.className = 'qs-active-score';
+      els.activeDetails.innerHTML = '';
+      return;
+    }
+
+    els.activeUrl.textContent = tab.url.replace(/^https?:\/\//, '');
+
+    const settings = await QSApi.getSettings();
+    const state = await send({ type: 'get-tab-state', tabId: tab.id });
+    const info = state && state.state ? state.state : null;
+
+    if (!info || info.status === 'checking') {
+      els.activeBadge.className = 'qs-verdict is-unknown';
+      els.activeBadge.textContent = 'Analyse en cours…';
+      els.activeScore.textContent = '…';
+      els.activeDetails.innerHTML = '';
+      return;
+    }
+
+    if (info.status === 'blocked') {
+      els.activeBadge.className = 'qs-verdict is-block';
+      els.activeBadge.textContent = 'BLOQUÉ';
+      els.activeScore.className = 'qs-active-score is-block';
+      els.activeScore.textContent = info.result ? info.result.score + '/100' : '—';
+      els.activeDetails.innerHTML = info.result && info.result.summary
+        ? '<div>' + escapeHtml(info.result.summary) + '</div>'
+        : '';
+      return;
+    }
+
+    const result = info.result;
+    if (!result) {
+      els.activeBadge.className = 'qs-verdict is-unknown';
+      els.activeBadge.textContent = info.status === 'bypassed' ? 'CONTOURNÉ' : 'EN ATTENTE';
+      els.activeScore.className = 'qs-active-score';
+      els.activeScore.textContent = '—';
+      els.activeDetails.innerHTML = '';
+      return;
+    }
+
+    const level = applyVerdictClasses(els.activeBadge, result.verdict, result.score, settings);
+    els.activeBadge.textContent = QSApi.verdictInfo(result.verdict).label;
+    els.activeScore.className = 'qs-active-score is-' + level;
+    els.activeScore.textContent = result.score + '/100';
+
+    const details = [];
+    if (result.findings && result.findings.length) {
+      const bad = result.findings.filter((f) => f.severity !== 'info').slice(0, 3);
+      details.push('<div><b>signaux :</b> ' + escapeHtml(bad.map((f) => f.title).join(' · ')) + '</div>');
+    }
+    if (info.forms) {
+      details.push(
+        '<div><b>formulaires :</b> ' +
+          (info.forms.passwordForms || 0) + ' identifiants · ' +
+          (info.forms.loginForms || 0) + ' champs sensibles · ' +
+          (info.forms.hiddenInputs || 0) + ' champs caches · ' +
+          (info.forms.mixedResources || 0) + ' ressources mixtes</div>',
+      );
+    }
+    if (info.bypassed) details.push('<div><b>contournement :</b> actif pour ce domaine</div>');
+    if (result.fromCache) details.push('<div><b>source :</b> cache local (ttl 1 h)</div>');
+    els.activeDetails.innerHTML = details.join('');
   }
 
   /* ------------------------------------------------------------ onglets */
@@ -96,16 +201,12 @@
     });
   });
 
-  /* ------------------------------------------------------------ canaux */
-
   els.channels.addEventListener('click', (event) => {
     const chip = event.target.closest('.qs-chip');
     if (!chip) return;
     els.channels.querySelectorAll('.qs-chip').forEach((c) => c.classList.toggle('is-active', c === chip));
     channel = chip.dataset.channel;
   });
-
-  /* ------------------------------------------------------------ compteur */
 
   els.messageInput.addEventListener('input', () => {
     if (els.messageInput.value.length > MAX_CHARS) {
@@ -117,19 +218,19 @@
   /* ------------------------------------------------------------ rendu resultat */
 
   function renderResult(data, kind) {
-    const verdict = VERDICTS[data.verdict] || VERDICTS.unknown;
+    const settings = { ...QSApi.DEFAULT_SETTINGS };
+    const verdict = QSApi.verdictInfo(data.verdict);
 
-    // Anneau de score
     els.ringArc.style.stroke = verdict.color;
     els.ringArc.style.strokeDashoffset = String(RING_CIRC * (1 - Math.min(100, Math.max(0, data.score)) / 100));
     els.ringScore.textContent = String(data.score);
 
-    // Badge verdict + synthese
-    els.verdictBadge.className = 'qs-verdict ' + verdict.cls;
+    els.verdictBadge.className = 'qs-verdict ' + (
+      verdict.level === 'block' ? 'is-block' : verdict.level === 'warn' ? 'is-warn' : 'is-safe'
+    );
     els.verdictBadge.textContent = verdict.label;
     els.resultSummary.textContent = data.summary || '';
 
-    // Constats
     const findings = (data.findings || []).slice(0, 8);
     els.findings.innerHTML = findings.length
       ? findings.map((f) => `
@@ -148,23 +249,18 @@
         `<p class="qs-note">… et ${hidden} autre${hidden > 1 ? 's' : ''} constat${hidden > 1 ? 's' : ''}.</p>`);
     }
 
-    // Recommandations
     const recos = (data.recommendations || []).slice(0, 5);
     els.recommendations.innerHTML = recos.length
       ? `<div class="qs-recos-title">Conduite a tenir</div>` +
         recos.map((r) => `<p class="qs-reco">${escapeHtml(typeof r === 'string' ? r : r.text)}</p>`).join('')
       : '';
 
-    // Meta
     const bits = [];
     if (data.meta) {
       if (kind === 'message') {
         if (data.meta.channel) bits.push('canal=' + data.meta.channel);
-        if (data.meta.llmUsed) bits.push('moteur semantique');
-      } else {
-        if (data.meta.active) bits.push('verifications reseau actives');
-        if (data.meta.siteContacted) bits.push('site contacte');
-        bits.push('site non contacte');
+      } else if (data.meta.active) {
+        bits.push('verifications actives (DNS/RDAP)');
       }
       if (data.meta.durationMs != null) bits.push(data.meta.durationMs + ' ms');
     }
@@ -177,8 +273,6 @@
     els.resultMeta.textContent = bits.join(' · ');
 
     els.result.hidden = false;
-
-    // Quota
     renderQuota(data.quota, data.plan);
   }
 
@@ -237,7 +331,7 @@
     setLoading(true, 'Verification du domaine…');
     try {
       const settings = await QSApi.getSettings();
-      const response = await QSApi.checkSite(url, settings);
+      const response = await QSApi.checkSite(url, settings, settings.networkChecks !== false);
       if (!response.ok) {
         showError(response.data.message || QSApi.ERROR_LABELS.unknown_error);
         return;
@@ -278,13 +372,34 @@
     }
   }
 
+  async function recheckPage() {
+    const tab = await send({ type: 'get-active-tab-url' });
+    if (!tab || !tab.url || !QSApi.isScannableUrl(tab.url)) return;
+    const domain = QSApi.registrableDomain(tab.url);
+    setLoading(true, 'Re-analyse forcee…');
+    try {
+      const settings = await QSApi.getSettings();
+      const response = await send({
+        type: 'check-domain',
+        domain,
+        force: true,
+        active: settings.networkChecks !== false,
+      });
+      if (response && response.result) {
+        await renderActivePage();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   /* ------------------------------------------------------------ historique */
 
   async function pushHistory(entry) {
     const bag = await chrome.storage.local.get('qs.history');
     const history = bag['qs.history'] || [];
     history.unshift(entry);
-    await chrome.storage.local.set({ 'qs.history': history.slice(0, 20) });
+    await chrome.storage.local.set({ 'qs.history': history.slice(0, 30) });
   }
 
   async function renderHistory() {
@@ -297,10 +412,10 @@
     els.history.innerHTML =
       '<div class="qs-history-title">Analyses recentes</div>' +
       history.map((e, i) => {
-        const v = VERDICTS[e.verdict] || VERDICTS.unknown;
+        const info = QSApi.verdictInfo(e.verdict);
         return `
           <button class="qs-hist-item" data-index="${i}">
-            <span class="qs-hist-score ${v.cls}">${e.score}</span>
+            <span class="qs-hist-score is-${info.level}">${e.score}</span>
             <span class="qs-hist-label">${escapeHtml(e.label)}</span>
           </button>`;
       }).join('');
@@ -321,29 +436,19 @@
   els.analyzeBtn.addEventListener('click', analyzeMessage);
   els.checkSiteBtn.addEventListener('click', checkSiteInput);
   els.auditPageBtn.addEventListener('click', auditCurrentPage);
-
+  els.recheckBtn.addEventListener('click', recheckPage);
   els.openOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   (async function init() {
-    const settings = await QSApi.getSettings();
-    els.protectState.textContent = settings.protectEnabled ? '●' : '○';
-    els.protectState.className = 'qs-protect ' + (settings.protectEnabled ? 'is-on' : 'is-off');
-    els.protectState.title = settings.protectEnabled
-      ? 'Surveillance des sites visites : active'
-      : 'Surveillance des sites visites : desactivee (reglages)';
+    await renderProtection();
+    await renderActivePage();
 
+    // Pre-remplissage de l'onglet actif dans l'onglet Site.
     try {
       const { url } = await send({ type: 'get-active-tab-url' });
       if (url && QSApi.isScannableUrl(url)) els.siteInput.value = url;
-    } catch { /* pas d onglet actif */ }
-
-    // Affiche immediatement le dernier resultat en cache pour ce domaine.
-    if (els.siteInput.value) {
-      try {
-        const domain = QSApi.registrableDomain(els.siteInput.value);
-        const { result } = await send({ type: 'get-cached-domain', domain });
-        if (result && els.result.hidden) renderResult(result, 'site');
-      } catch { /* cache indisponible */ }
+    } catch {
+      /* pas d onglet actif */
     }
 
     renderHistory();

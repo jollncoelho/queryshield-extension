@@ -1,31 +1,50 @@
 /**
- * QueryShield — service worker (Manifest V3).
+ * QueryShield — service worker v2 (Manifest V3).
  *
- * Role : surveillance silencieuse des domaines visites.
- *  - chaque nouvel onglet / navigation declenche une verification mettee en cache
- *  - phishing confirme  -> badge rouge "!" + notification systeme
- *  - site suspect       -> badge ambre "?"
- *  - domaine sain       -> badge efface
+ * Boucle principale :
+ *   1. webNavigation.onBeforeNavigate (zero-click) -> domaine inscriptible
+ *   2. cache 1 h -> sinon POST /api/check-site (verifications actives : age, DNS)
+ *   3. decision :
+ *        phishing / score >= seuil de blocage
+ *          -> regle DNR "block main_frame" + redirection vers blocked.html
+ *        score >= seuil d'alerte -> badge ambre "?"
+ *        domaine officiel / sain -> badge efface
+ *   4. rapports du contenu script (formulaires de harvesting) -> escalation
  *
- * Le service n'est jamais contacte en direct : seules les API QueryShield
- * (shield.query-intel.com) sont appelees, jamais le site analyse.
+ * Le site analyse n'est JAMAIS contacte : seules les API shield.query-intel.com
+ * sont appelees.
  */
 importScripts('shared/api.js');
 
-const CACHE_KEY = 'qs.cache';       // domaine -> { ts, verdict, score, summary, officialBrand }
-const HISTORY_KEY = 'qs.history';   // 20 dernieres analyses
-const STATE_KEY = 'qs.state';       // { pausedUntil, lastCallAt }
-const CACHE_TTL_MS = 60 * 60 * 1000;      // 1 h
-const MIN_CALL_INTERVAL_MS = 2000;        // anti-rafale entre appels API
-const pendingTimers = new Map();          // tabId -> timer de debounce (memoire volatile)
+/* ---------------------------------------------------------------- constantes */
 
-/* ------------------------------------------------------------------ badge */
+const CACHE_KEY = 'qs.cache';
+const STATE_KEY = 'qs.state';
+const HISTORY_KEY = 'qs.history';
+const BYPASS_KEY = 'qs.bypass';
+const NOTIFIED_KEY = 'qs.notified';
+const CACHE_TTL_MS = 60 * 60 * 1000;
+const MIN_CALL_INTERVAL_MS = 2000;
+const LAST_CALL_KEY = 'qs.lastCallAt';
 
-const BADGE_COLORS = {
-  phishing: '#ff3b5c',
-  suspicious: '#ffb020',
-  paused: '#5a6472',
-};
+const BADGE_COLORS = { phishing: '#ff3b5c', suspicious: '#ffb020', paused: '#5a6472' };
+
+/** declarativeNetRequest (Chrome / Firefox 128+). */
+const DNR_AVAILABLE =
+  typeof chrome.declarativeNetRequest === 'object' &&
+  chrome.declarativeNetRequest !== null &&
+  typeof chrome.declarativeNetRequest.updateDynamicRules === 'function';
+
+/* ---------------------------------------------------------------- etat volatile */
+
+/** tabId -> { url, host, status, result, forms, updatedAt } */
+const tabState = new Map();
+/** tabId -> { url, host, result } : page bloquee en attente de decision. */
+const pendingBlocks = new Map();
+/** Domaines court-circuites par l'utilisateur (session). */
+const sessionBypass = new Set();
+
+/* ------------------------------------------------------------------- badge */
 
 async function setBadge(text, color) {
   await chrome.action.setBadgeBackgroundColor({ color: color || '#5a6472' });
@@ -36,7 +55,7 @@ async function clearBadge() {
   await chrome.action.setBadgeText({ text: '' });
 }
 
-/* ------------------------------------------------------------- stockage */
+/* ---------------------------------------------------------------- stockage */
 
 async function readJson(key, fallback) {
   const bag = await chrome.storage.local.get(key);
@@ -50,48 +69,123 @@ async function writeJson(key, value) {
 async function pushHistory(entry) {
   const history = await readJson(HISTORY_KEY, []);
   history.unshift(entry);
-  await writeJson(HISTORY_KEY, history.slice(0, 20));
+  await writeJson(HISTORY_KEY, history.slice(0, 30));
 }
 
-/* ------------------------------------------------------ verification site */
+/* ------------------------------------------------------------------- regles DNR */
 
-async function getCached(domain) {
+function ruleIdFor(host) {
+  // Identifiant stable et numerique dans [1, 2^31-1].
+  let hash = 0;
+  for (let i = 0; i < host.length; i += 1) {
+    hash = (hash * 31 + host.charCodeAt(i)) % 2147483647;
+  }
+  return (hash % 2000000) + 1;
+}
+
+async function addBlockRule(host) {
+  if (!DNR_AVAILABLE) return;
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [ruleIdFor(host)],
+      addRules: [
+        {
+          id: ruleIdFor(host),
+          priority: 1,
+          action: { type: 'block' },
+          condition: { requestDomains: [host], resourceTypes: ['main_frame'] },
+        },
+      ],
+    });
+  } catch {
+    /* regle impossible : la redirection reste le filet de securite */
+  }
+}
+
+async function addBypassRule(host) {
+  if (!DNR_AVAILABLE) return;
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      addRules: [
+        {
+          id: ruleIdFor(host),
+          priority: 10,
+          action: { type: 'allow' },
+          condition: { requestDomains: [host], resourceTypes: ['main_frame'] },
+        },
+      ],
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+async function persistBypass(host) {
+  sessionBypass.add(host);
+  const stored = await readJson(BYPASS_KEY, []);
+  if (!stored.includes(host)) {
+    stored.push(host);
+    await writeJson(BYPASS_KEY, stored.slice(0, 200));
+  }
+}
+
+async function loadBypass() {
+  const stored = await readJson(BYPASS_KEY, []);
+  stored.forEach((host) => sessionBypass.add(host));
+}
+
+/* ------------------------------------------------------------ verification site */
+
+async function getCached(host) {
   const cache = await readJson(CACHE_KEY, {});
-  const hit = cache[domain];
+  const hit = cache[host];
   if (!hit) return null;
   if (Date.now() - hit.ts > CACHE_TTL_MS) return null;
   return hit;
 }
 
-async function storeCache(domain, entry) {
+async function storeCache(host, entry) {
   const cache = await readJson(CACHE_KEY, {});
-  cache[domain] = entry;
-  // Nettoyage opportuniste des entrees perimees.
+  cache[host] = entry;
   for (const [key, value] of Object.entries(cache)) {
     if (Date.now() - value.ts > CACHE_TTL_MS) delete cache[key];
   }
-  await writeJson(CACHE_KEY, cache);
   if (Object.keys(cache).length > 500) {
-    // Filet de securite : on ne conserve jamais plus de 500 domaines.
-    const entries = Object.entries(cache).sort((a, b) => b[1].ts - a[1].ts).slice(0, 500);
-    await writeJson(CACHE_KEY, Object.fromEntries(entries));
+    const kept = Object.entries(cache)
+      .sort((a, b) => b[1].ts - a[1].ts)
+      .slice(0, 500);
+    await writeJson(CACHE_KEY, Object.fromEntries(kept));
+  } else {
+    await writeJson(CACHE_KEY, cache);
   }
 }
 
 async function isPaused() {
   const state = await readJson(STATE_KEY, {});
-  return state.pausedUntil && state.pausedUntil > Date.now();
+  return Boolean(state.pausedUntil && state.pausedUntil > Date.now());
 }
 
-async function noteCall() {
-  await writeJson(STATE_KEY, { ...(await readJson(STATE_KEY, {})), lastCallAt: Date.now() });
+/** Normalise une reponse check-site en entree de cache. */
+function buildEntry(data) {
+  return {
+    ts: Date.now(),
+    verdict: data.verdict,
+    score: data.score,
+    summary: data.summary,
+    officialBrand: data.officialBrand || null,
+    impersonatedBrands: data.impersonatedBrands || [],
+    findings: (data.findings || []).map((f) => ({ id: f.id, severity: f.severity, title: f.title })),
+    recommendations: (data.recommendations || []).map((r) => (typeof r === 'string' ? r : r.text)),
+    network: data.network || null,
+    meta: data.meta || null,
+  };
 }
 
 /**
- * Verifie un domaine via l'API (avec cache).
- * @returns {Promise<object|null>} resultat normalise ou null si non applicable.
+ * Verification d'un domaine (cache + anti-rafale + quota).
+ * @returns {Promise<object|null>}
  */
-async function checkDomain(domain, { force = false } = {}) {
+async function checkDomain(domain, { force = false, active = true } = {}) {
   if (!QSApi.isScannableUrl('https://' + domain)) return null;
 
   if (!force) {
@@ -104,20 +198,20 @@ async function checkDomain(domain, { force = false } = {}) {
     return null;
   }
 
-  // Anti-rafale : espace les appels reseau.
   const state = await readJson(STATE_KEY, {});
-  if (!force && state.lastCallAt && Date.now() - state.lastCallAt < MIN_CALL_INTERVAL_MS) {
+  const lastCall = state[LAST_CALL_KEY];
+  if (!force && lastCall && Date.now() - lastCall < MIN_CALL_INTERVAL_MS) {
     await new Promise((r) => setTimeout(r, MIN_CALL_INTERVAL_MS));
   }
-  await noteCall();
+  state[LAST_CALL_KEY] = Date.now();
+  await writeJson(STATE_KEY, state);
 
   const settings = await QSApi.getSettings();
-  const result = await QSApi.checkSite(domain, settings);
+  const result = await QSApi.checkSite(domain, settings, active);
 
   if (!result.ok) {
     if (result.status === 429) {
-      // Quota ou debit : on met la surveillance en pause et on previendra l'utilisateur.
-      const pauseMs = Math.min((result.retryAfter || 900), 24 * 3600) * 1000;
+      const pauseMs = Math.min(result.retryAfter || 900, 24 * 3600) * 1000;
       await writeJson(STATE_KEY, { pausedUntil: Date.now() + pauseMs });
       await setBadge('OFF', BADGE_COLORS.paused);
       await notifyOnce('qs-quota', {
@@ -128,14 +222,7 @@ async function checkDomain(domain, { force = false } = {}) {
     return null;
   }
 
-  const entry = {
-    ts: Date.now(),
-    verdict: result.data.verdict,
-    score: result.data.score,
-    summary: result.data.summary,
-    officialBrand: result.data.officialBrand,
-    impersonatedBrands: result.data.impersonatedBrands || [],
-  };
+  const entry = buildEntry(result.data);
   await storeCache(domain, entry);
   await pushHistory({
     ts: Date.now(),
@@ -144,45 +231,62 @@ async function checkDomain(domain, { force = false } = {}) {
     verdict: entry.verdict,
     score: entry.score,
   });
-
-  await applyBadgePolicy(entry, settings, domain);
   return { ...entry, fromCache: false };
 }
 
-/** Applique badge + notification selon le verdict et le seuil choisi. */
-async function applyBadgePolicy(entry, settings, domain) {
-  if (!settings) settings = await QSApi.getSettings();
+/* ---------------------------------------------------------------- decision */
 
-  if (entry.verdict === 'phishing') {
+/** Applique badge / blocage selon le verdict et les seuils. */
+async function decide(tabId, url, host, entry, settings) {
+  const level = QSApi.threatLevel(entry, settings);
+
+  if (level === 'block' && settings.blockMode && !sessionBypass.has(host)) {
     await setBadge('!', BADGE_COLORS.phishing);
+    await addBlockRule(host);
+    pendingBlocks.set(tabId, { url, host, result: entry });
+
     if (settings.notifyPhishing) {
-      await notifyOnce('qs-alert-' + entry.ts, {
-        title: '⚠ Site signale comme phishing',
-        message: entry.summary || ('Ne saisissez aucune donnee sur ' + domain + '.'),
-        domain,
+      await notifyOnce('qs-alert-' + host, {
+        title: '⚠ Site bloque — ' + host,
+        message: (entry.summary || 'Ne saisissez aucune donnee sur ce site.').slice(0, 180),
+        domain: host,
       });
     }
-    return;
+
+    const params = new URLSearchParams({
+      host,
+      score: String(entry.score),
+      verdict: entry.verdict,
+      src: 'background',
+    });
+    try {
+      await chrome.tabs.update(tabId, { url: chrome.runtime.getURL('blocked/blocked.html') + '?' + params.toString() });
+    } catch {
+      /* onglet ferme entre-temps */
+    }
+    return level;
   }
 
-  if (entry.score >= settings.alertThreshold) {
+  if (level === 'block') {
+    // Mode avertissement seul ou bypass : badge rouge sans blocage.
+    await setBadge('!', BADGE_COLORS.phishing);
+  } else if (level === 'warn') {
     await setBadge('?', BADGE_COLORS.suspicious);
-    return;
+  } else {
+    await clearBadge();
   }
-
-  await clearBadge();
+  return level;
 }
 
-/** Notification unique par cle (evite les doublons lors des navigations repetees). */
+/** Notification unique par cle (evite les doublons). */
 async function notifyOnce(id, options) {
-  const seen = await readJson('qs.notified', {});
+  const seen = await readJson(NOTIFIED_KEY, {});
   if (seen[id]) return;
   seen[id] = Date.now();
-  // Purge les cles de plus de 24 h.
   for (const [key, ts] of Object.entries(seen)) {
     if (Date.now() - ts > 24 * 3600 * 1000) delete seen[key];
   }
-  await writeJson('qs.notified', seen);
+  await writeJson(NOTIFIED_KEY, seen);
 
   await chrome.notifications.create(id, {
     type: 'basic',
@@ -192,99 +296,240 @@ async function notifyOnce(id, options) {
     priority: 2,
     silent: false,
   });
-  // Memorise le domaine pour le clic sur la notification.
   if (options.domain) {
     await writeJson('qs.lastAlertDomain', { domain: options.domain, ts: Date.now() });
   }
 }
 
-/* ------------------------------------------------------------ navigation */
+/* ---------------------------------------------------------------- navigation */
 
-/** Planifie la verification d'un onglet (debounce 800 ms, en memoire). */
-async function scheduleTabCheck(tabId, url) {
-  const domain = QSApi.registrableDomain(url);
-  if (!domain || !QSApi.isScannableUrl(url)) return;
+let navQueue = Promise.resolve();
+const inFlight = new Map(); // host -> Promise (evite les doublons simultanes)
+
+async function handleNavigation(tabId, url) {
+  if (!url || !QSApi.isScannableUrl(url)) return;
+  const host = QSApi.registrableDomain(url);
+  if (!host) return;
+
   const settings = await QSApi.getSettings();
-  if (!settings.protectEnabled) return;
+  if (!settings.protectEnabled) {
+    await clearBadge();
+    return;
+  }
+  if (await isPaused()) {
+    await setBadge('OFF', BADGE_COLORS.paused);
+    return;
+  }
 
-  const existing = pendingTimers.get(tabId);
-  if (existing) clearTimeout(existing);
+  const previous = tabState.get(tabId);
+  if (previous && previous.host === host && previous.status === 'blocked') return;
 
-  const timer = setTimeout(async () => {
-    pendingTimers.delete(tabId);
+  tabState.set(tabId, {
+    url,
+    host,
+    status: 'checking',
+    result: null,
+    forms: null,
+    updatedAt: Date.now(),
+  });
+
+  navQueue = navQueue.then(async () => {
     try {
-      await checkDomain(domain);
+      // Reutilise une verification en cours pour le meme domaine.
+      let pending = inFlight.get(host);
+      if (!pending) {
+        pending = checkDomain(host, { active: settings.networkChecks }).finally(() => inFlight.delete(host));
+        inFlight.set(host, pending);
+      }
+      const entry = await pending;
+      if (!entry) return;
+      const current = tabState.get(tabId);
+      if (current && current.host !== host) return; // l'onglet a change de page
+      current && (current.result = entry);
+      await decide(tabId, url, host, entry, settings);
     } catch {
-      /* une erreur reseau ne doit jamais faire echouer la navigation */
+      /* une erreur ne doit jamais bloquer la navigation */
     }
-  }, 800);
-
-  pendingTimers.set(tabId, timer);
+  });
+  return navQueue;
 }
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  const url = changeInfo.url || (tab && tab.url);
-  if (!url) return;
-  // Attend le chargement complet pour ne verifier qu'une fois par page.
-  if (changeInfo.status === 'complete' || changeInfo.url) {
-    scheduleTabCheck(tabId, url);
-  }
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId !== 0) return;
+  handleNavigation(details.tabId, details.url);
 });
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (tab && tab.url) scheduleTabCheck(tabId, tab.url);
+    if (tab && tab.url) handleNavigation(tabId, tab.url);
   } catch {
-    /* onglet ferme entre-temps */
+    /* onglet ferme */
   }
 });
 
-/* ---------------------------------------------------------- notifications */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabState.delete(tabId);
+  pendingBlocks.delete(tabId);
+});
+
+/* --------------------------------------------------------- rapports de contenu */
+
+/**
+ * Le contenu script signale la structure de la page (formulaires de harvesting).
+ * Un formulaire d'identifiants sur un domaine NON VERIFIE (ou suspect) declenche
+ * le badge + un bandeau d'avertissement injecte dans la page.
+ */
+async function handlePageReport(tabId, report) {
+  const state = tabState.get(tabId) || { host: null, url: null, result: null, forms: null };
+  state.forms = report;
+  state.url = report.url || state.url;
+  if (report.host) state.host = report.host;
+  tabState.set(tabId, state);
+
+  const settings = await QSApi.getSettings();
+  const level = QSApi.threatLevel(state.result, settings);
+  const unverified = Boolean(
+    state.result &&
+      state.result.verdict === 'unknown' &&
+      !(state.result.officialBrand && state.result.officialBrand.name),
+  );
+  const credentialForm = Boolean(report.passwordForms && report.passwordForms > 0);
+  const escalate =
+    settings.protectEnabled && credentialForm &&
+    (level === 'warn' || level === 'block' || unverified || !state.result);
+
+  if (escalate) {
+    await setBadge('?', BADGE_COLORS.suspicious);
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'show-form-warning', report, level });
+    } catch {
+      /* contenu script pas encore pret */
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- messages */
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  (async () => {
+    switch (message && message.type) {
+      case 'check-domain': {
+        const entry = await checkDomain(message.domain, {
+          force: message.force === true,
+          active: message.active === true,
+        });
+        sendResponse({ result: entry });
+        return;
+      }
+
+      case 'get-tab-state': {
+        const tabId =
+          message.tabId ??
+          (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+        const state = tabId == null ? null : tabState.get(tabId) || null;
+        const pending = tabId == null ? null : pendingBlocks.get(tabId) || null;
+        const bypass = await readJson(BYPASS_KEY, []);
+        sendResponse({
+          state: state ? { ...state, bypassed: bypass.includes(state.host) } : null,
+          pending,
+          paused: await isPaused(),
+        });
+        return;
+      }
+
+      case 'page-report': {
+        const tabId = sender.tab && sender.tab.id;
+        if (tabId != null) await handlePageReport(tabId, message.report);
+        sendResponse({ ok: true });
+        return;
+      }
+
+      case 'get-active-tab-url': {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        sendResponse({ url: tab && tab.url ? tab.url : null, title: tab && tab.title ? tab.title : null });
+        return;
+      }
+
+      case 'get-block-info': {
+        const host = message.host;
+        const cached = host ? await getCached(host) : null;
+        sendResponse({ result: cached });
+        return;
+      }
+
+      case 'bypass-domain': {
+        const { host, url } = message;
+        await persistBypass(host);
+        await addBypassRule(host);
+        const state = tabState.get(message.tabId);
+        if (state) {
+          state.status = 'bypassed';
+          tabState.set(message.tabId, state);
+        }
+        pendingBlocks.delete(message.tabId);
+        await setBadge('?', BADGE_COLORS.suspicious);
+        try {
+          await chrome.tabs.update(message.tabId, { url: url || 'https://' + host });
+        } catch {
+          /* onglet ferme */
+        }
+        sendResponse({ ok: true });
+        return;
+      }
+
+      case 'go-back': {
+        try {
+          await chrome.tabs.goBack(message.tabId);
+        } catch {
+          try {
+            await chrome.tabs.update(message.tabId, { url: 'about:blank' });
+          } catch {
+            /* onglet ferme */
+          }
+        }
+        sendResponse({ ok: true });
+        return;
+      }
+
+      case 'get-cached-domain': {
+        sendResponse({ result: await getCached(message.domain) });
+        return;
+      }
+
+      case 'settings-changed': {
+        const s = await QSApi.getSettings();
+        if (!s.protectEnabled || (await isPaused())) await clearBadge();
+        sendResponse({ ok: true });
+        return;
+      }
+
+      case 'get-history': {
+        sendResponse({ history: (await readJson(HISTORY_KEY, [])).slice(0, 8) });
+        return;
+      }
+
+      default:
+        sendResponse({ error: 'unknown_message' });
+    }
+  })().catch(() => sendResponse({ error: 'internal' }));
+  return true;
+});
+
+/* ---------------------------------------------------------------- notifications */
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   await chrome.notifications.clear(notificationId);
   const last = await readJson('qs.lastAlertDomain', null);
   const target = last && last.domain
     ? 'https://shield.query-intel.com/verifier-site?url=' + encodeURIComponent(last.domain)
-    : 'https://shield.query-intel.com/verifier-site';
+    : 'https://shield.query-intel.com';
   await chrome.tabs.create({ url: target });
-  await clearBadge();
-});
-
-/* ------------------------------------------------------------- messages */
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  (async () => {
-    if (message && message.type === 'check-domain') {
-      const result = await checkDomain(message.domain, { force: message.force === true });
-      sendResponse({ result });
-      return;
-    }
-    if (message && message.type === 'get-cached-domain') {
-      const hit = await getCached(message.domain);
-      sendResponse({ result: hit });
-      return;
-    }
-    if (message && message.type === 'get-active-tab-url') {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      sendResponse({ url: tab && tab.url ? tab.url : null, title: tab && tab.title ? tab.title : null });
-      return;
-    }
-    if (message && message.type === 'settings-changed') {
-      const s = await QSApi.getSettings();
-      if (!s.protectEnabled || !(await isPaused())) await clearBadge();
-      sendResponse({ ok: true });
-      return;
-    }
-    sendResponse({ error: 'unknown_message' });
-  })().catch(() => sendResponse({ error: 'internal' }));
-  return true; // reponse asynchrone
 });
 
 /* ---------------------------------------------------------------- alarmes */
 
-chrome.alarms.create('qs-cleanup', { periodInMinutes: 1440 });
+chrome.alarms.create('qs-cleanup', { periodInMinutes: 180 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'qs-cleanup') return;
   const cache = await readJson(CACHE_KEY, {});
@@ -298,9 +543,16 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (changed) await writeJson(CACHE_KEY, cache);
 });
 
-/* ------------------------------------------------------------- cycle de vie */
+/* ---------------------------------------------------------------- cycle de vie */
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await QSApi.saveSettings({}); // materialise les reglages par defaut
-  await clearBadge();
+  await loadBypass();
 });
+
+chrome.runtime.onStartup.addListener(async () => {
+  await loadBypass();
+});
+
+// Les regles DNR dynamques persistent : au demarrage on s'assure que les
+// contournements enregistres restent appliques.
+loadBypass().catch(() => {});

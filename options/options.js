@@ -7,9 +7,13 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     protect: $('protect-enabled'),
+    blockMode: $('block-mode'),
+    networkChecks: $('network-checks'),
     notify: $('notify-phishing'),
     threshold: $('threshold'),
     thresholdValue: $('threshold-value'),
+    blockThreshold: $('block-threshold'),
+    blockThresholdValue: $('block-threshold-value'),
     license: $('license'),
     licenseStatus: $('license-status'),
     apiBase: $('api-base'),
@@ -17,6 +21,7 @@
     save: $('save-btn'),
     test: $('test-btn'),
     clearCache: $('clear-cache-btn'),
+    clearBypass: $('clear-bypass-btn'),
   };
 
   function setStatus(el, text, state) {
@@ -28,9 +33,13 @@
   async function load() {
     const s = await QSApi.getSettings();
     els.protect.checked = s.protectEnabled;
+    els.blockMode.checked = s.blockMode;
+    els.networkChecks.checked = s.networkChecks;
     els.notify.checked = s.notifyPhishing;
     els.threshold.value = String(s.alertThreshold);
     els.thresholdValue.textContent = String(s.alertThreshold);
+    els.blockThreshold.value = String(s.blockThreshold);
+    els.blockThresholdValue.textContent = String(s.blockThreshold);
     els.license.value = s.license || '';
     els.apiBase.value = s.apiBase;
   }
@@ -39,12 +48,14 @@
     const apiBase = els.apiBase.value.trim() || QSApi.DEFAULT_API_BASE;
     await QSApi.saveSettings({
       protectEnabled: els.protect.checked,
+      blockMode: els.blockMode.checked,
+      networkChecks: els.networkChecks.checked,
       notifyPhishing: els.notify.checked,
       alertThreshold: Number(els.threshold.value),
+      blockThreshold: Number(els.blockThreshold.value),
       license: els.license.value.trim(),
       apiBase,
     });
-    // Signale au worker que les reglages ont change (badge a rafraichir).
     chrome.runtime.sendMessage({ type: 'settings-changed' });
     setStatus(els.healthStatus, 'Reglages enregistres.', 'is-ok');
   }

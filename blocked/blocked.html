@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QueryShield — Navigation bloquée</title>
+  <link rel="stylesheet" href="blocked.css" />
+</head>
+<body>
+  <div class="qs-alert" role="alertdialog" aria-labelledby="qs-alert-title">
+    <div class="qs-scanline" aria-hidden="true"></div>
+
+    <header class="qs-head">
+      <div class="qs-head-left">
+        <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+          <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z"
+                fill="none" stroke="#ff3b5c" stroke-width="1.8" stroke-linejoin="round"/>
+          <path d="M12 8v5" stroke="#ff3b5c" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="12" cy="16.4" r="1.1" fill="#ff3b5c"/>
+        </svg>
+        <div>
+          <span class="qs-brand">QueryShield</span>
+          <span class="qs-sub">mur de protection · interception active</span>
+        </div>
+      </div>
+      <span class="qs-level">MENACE CONFIRMÉE</span>
+    </header>
+
+    <main class="qs-body">
+      <h1 id="qs-alert-title">Cette page a été bloquée avant son affichage.</h1>
+
+      <div class="qs-target">
+        <div class="qs-target-url" id="host">…</div>
+        <div class="qs-target-meta" id="target-meta"></div>
+      </div>
+
+      <div class="qs-grid">
+        <section class="qs-panel">
+          <h2>Verdict du moteur</h2>
+          <div class="qs-score">
+            <div class="qs-score-num" id="score">0</div>
+            <div class="qs-score-cap">risque /100</div>
+          </div>
+          <div class="qs-verdict" id="verdict">—</div>
+          <p class="qs-summary" id="summary"></p>
+        </section>
+
+        <section class="qs-panel">
+          <h2>Pourquoi ce blocage</h2>
+          <ul class="qs-reasons" id="reasons"></ul>
+          <div class="qs-age" id="domain-age" hidden></div>
+        </section>
+      </div>
+
+      <section class="qs-panel qs-panel-wide">
+        <h2>Conduite à tenir</h2>
+        <ul class="qs-recos" id="recos"></ul>
+      </section>
+
+      <section class="qs-panel qs-panel-wide qs-ioc">
+        <h2>Indicateurs extraits</h2>
+        <div class="qs-chips" id="iocs"></div>
+      </section>
+
+      <div class="qs-actions">
+        <button id="back-btn" class="qs-btn qs-btn-back" type="button">
+          ← Revenir en arrière
+        </button>
+        <button id="bypass-btn" class="qs-btn qs-btn-bypass" type="button">
+          Continuer quand même (utilisateur avancé)
+        </button>
+        <button id="report-btn" class="qs-btn qs-btn-report" type="button">
+          Rapport complet ↗
+        </button>
+      </div>
+
+      <div class="qs-bypass-confirm" id="bypass-confirm" hidden>
+        <p><b>Faux positif ?</b> Le domaine <span id="bypass-host"></span> sera ajouté à votre
+        liste de contournement locale : il ne sera plus bloqué et sera simplement
+        signalé par un badge. Cette liste reste sur votre machine.</p>
+        <div class="qs-actions">
+          <button id="bypass-yes" class="qs-btn qs-btn-bypass" type="button">Ajouter à la liste de contournement</button>
+          <button id="bypass-no" class="qs-btn qs-btn-ghost" type="button">Annuler</button>
+        </div>
+      </div>
+
+      <p class="qs-foot">
+        QueryShield analyse des métadonnées publiques — le site bloqué n'a jamais été
+        contacté. Aucune donnée n'a été saisie ni transmise.
+      </p>
+    </main>
+  </div>
+
+  <script src="../shared/api.js"></script>
+  <script src="blocked.js"></script>
+</body>
+</html>

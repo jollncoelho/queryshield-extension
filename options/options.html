@@ -22,23 +22,40 @@
     </header>
 
     <section class="qs-card">
-      <h2>Surveillance</h2>
+      <h2>Mur de protection</h2>
 
       <label class="qs-switch">
-        <input type="checkbox" id="protect-enabled" />
+        <input type="checkbox" id="block-mode" />
         <span class="qs-switch-track" aria-hidden="true"></span>
         <span>
-          <strong>Analyser les sites que je visite</strong>
-          <small>Chaque page est comparee au referentiel de marques et aux signaux de phishing. Le site analyse n est jamais contacte.</small>
+          <strong>Bloquer le rendu des pages malveillantes</strong>
+          <small>Quand c'est actif, une page de phishing est interceptee avant affichage (regle DNR + redirection). Sinon, simple badge d'alerte.</small>
+        </span>
+      </label>
+
+      <div class="qs-field">
+        <label for="block-threshold">
+          Seuil de blocage <output id="block-threshold-value">75</output>/100
+        </label>
+        <input type="range" id="block-threshold" min="50" max="95" step="5" value="75" />
+        <small>Score de risque a partir duquel la navigation est interceptee. Les verdicts « phishing » sont toujours bloques.</small>
+      </div>
+
+      <label class="qs-switch">
+        <input type="checkbox" id="network-checks" />
+        <span class="qs-switch-track" aria-hidden="true"></span>
+        <span>
+          <strong>Verifications actives (age du domaine, DNS)</strong>
+          <small>Interroge l'annuaire RDAP pour connaitre l'age du domaine. Plus lent mais detecte les domaines jetables.</small>
         </span>
       </label>
 
       <div class="qs-field">
         <label for="threshold">
-          Seuil d alerte <output id="threshold-value">60</output>/100
+          Seuil d'alerte <output id="threshold-value">60</output>/100
         </label>
         <input type="range" id="threshold" min="30" max="90" step="5" value="60" />
-        <small>En dessous du seuil, une page suspecte affiche un badge ambre « ? ». Un site signale phishing declenche toujours l alerte rouge.</small>
+        <small>En dessous du seuil de blocage, une page suspecte affiche un badge ambre « ? ». Un site signale phishing declenche toujours l alerte rouge.</small>
       </div>
 
       <label class="qs-switch">
@@ -72,6 +89,7 @@
         <button id="save-btn" class="qs-btn qs-btn-primary">Enregistrer</button>
         <button id="test-btn" class="qs-btn qs-btn-ghost">Tester la connexion</button>
         <button id="clear-cache-btn" class="qs-btn qs-btn-ghost">Vider le cache local</button>
+        <button id="clear-bypass-btn" class="qs-btn qs-btn-ghost">Vider les contournements</button>
       </div>
     </section>
 

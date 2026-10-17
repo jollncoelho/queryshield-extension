@@ -1,24 +1,50 @@
 {
   "manifest_version": 3,
-  "name": "QueryShield — Protection anti-arnaque",
+  "name": "QueryShield — Bouclier anti-arnaque",
   "short_name": "QueryShield",
-  "version": "1.0.0",
-  "description": "Analyse instantanee de SMS, e-mails et URLs suspects. Verifie les sites que vous visitez et vous alerte en cas de phishing.",
-  "permissions": ["storage", "tabs", "notifications", "alarms"],
-  "host_permissions": ["https://shield.query-intel.com/*"],
+  "version": "2.0.0",
+  "description": "Analyse zero-click des pages, detection des formulaires de harvesting, blocage actif des sites de phishing et console tactique.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "notifications",
+    "alarms",
+    "webNavigation",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://shield.query-intel.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "QueryShield — analyser un message ou un site",
+    "default_title": "QueryShield — console tactique",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
-  "background": {
-    "service_worker": "background.js"
-  },
   "options_page": "options/options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked/blocked.html", "blocked/blocked.js", "icons/icon128.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -27,7 +53,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "extension@query-intel.com",
-      "strict_min_version": "109.0"
+      "strict_min_version": "128.0"
     }
   }
 }

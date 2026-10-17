@@ -17,7 +17,7 @@
       </svg>
       <div>
         <strong>QueryShield</strong>
-        <span class="qs-sub">moteur heuristique · anti-arnaque</span>
+        <span class="qs-sub">console tactique · v2.0</span>
       </div>
     </div>
     <button id="open-options" class="qs-icon-btn" title="Reglages" aria-label="Reglages">
@@ -27,13 +27,32 @@
     </button>
   </header>
 
+  <div id="protection-line" class="qs-protection">
+    <span id="protect-state" class="qs-dot" title="Etat de la surveillance">●</span>
+    <span id="protect-label">Surveillance active</span>
+    <span id="protect-mode" class="qs-mode">blocage</span>
+  </div>
+
+  <!-- ================= Page active ================= -->
+  <section id="active-page" class="qs-active">
+    <div class="qs-active-head">
+      <span class="qs-label">Page active</span>
+      <button id="recheck-btn" class="qs-mini-btn" title="Relancer l'analyse">↻</button>
+    </div>
+    <div id="active-url" class="qs-active-url">…</div>
+    <div class="qs-active-status">
+      <span id="active-badge" class="qs-verdict is-unknown">—</span>
+      <span id="active-score" class="qs-active-score">—</span>
+    </div>
+    <div id="active-details" class="qs-active-details"></div>
+  </section>
+
   <nav class="qs-tabs" role="tablist">
     <button class="qs-tab is-active" role="tab" data-tab="message" aria-selected="true">Message</button>
     <button class="qs-tab" role="tab" data-tab="site" aria-selected="false">Site</button>
-    <span id="protect-state" class="qs-protect" title="Surveillance des sites visites">●</span>
   </nav>
 
-  <!-- ======================= Onglet Message ======================= -->
+  <!-- ================= Onglet Message ================= -->
   <section id="tab-message" class="qs-panel">
     <div class="qs-channels" id="channels" role="group" aria-label="Canal">
       <button class="qs-chip is-active" data-channel="unknown">Auto</button>
@@ -41,7 +60,7 @@
       <button class="qs-chip" data-channel="email">E-mail</button>
       <button class="qs-chip" data-channel="messaging">Messagerie</button>
     </div>
-    <textarea id="message-input" class="qs-textarea" rows="7"
+    <textarea id="message-input" class="qs-textarea" rows="5"
       placeholder="Collez ici le SMS, l'e-mail ou le message suspect…"></textarea>
     <div class="qs-row">
       <span id="char-count" class="qs-counter">0 / 20000</span>
@@ -49,7 +68,7 @@
     </div>
   </section>
 
-  <!-- ======================= Onglet Site ======================= -->
+  <!-- ================= Onglet Site ================= -->
   <section id="tab-site" class="qs-panel" hidden>
     <label class="qs-label" for="site-input">Adresse a verifier</label>
     <input id="site-input" class="qs-input" type="text" spellcheck="false"
@@ -62,16 +81,13 @@
     <p class="qs-note">Le site n'est jamais ouvert : seules des metadonnees publiques sont analysees.</p>
   </section>
 
-  <!-- ======================= Erreur ======================= -->
   <div id="error-box" class="qs-error" hidden></div>
 
-  <!-- ======================= Chargement ======================= -->
   <div id="loading-box" class="qs-loading" hidden>
     <span class="qs-spinner"></span>
     <span id="loading-text">Analyse en cours…</span>
   </div>
 
-  <!-- ======================= Resultat ======================= -->
   <section id="result" class="qs-result" hidden>
     <div class="qs-score-block">
       <svg viewBox="0 0 120 120" class="qs-ring" width="84" height="84">
@@ -92,7 +108,6 @@
     <div id="result-meta" class="qs-meta"></div>
   </section>
 
-  <!-- ======================= Historique / quota ======================= -->
   <footer class="qs-foot">
     <div id="quota-line" class="qs-quota" hidden></div>
     <div id="history" class="qs-history"></div>
