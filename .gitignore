@@ -1,0 +1,10 @@
+# Fichiers systeme
+.DS_Store
+Thumbs.db
+
+# Archives de publication (generees a la main pour les stores)
+*.zip
+
+# Logs / node
+node_modules/
+*.log

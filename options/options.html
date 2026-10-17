@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QueryShield — Reglages</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="qs-wrap">
+    <header class="qs-head">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z"
+              fill="none" stroke="#00f2fe" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="m8.5 12 2.4 2.4L15.5 10" fill="none" stroke="#00f2fe" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <h1>QueryShield — Reglages</h1>
+        <p>Protection anti-arnaque pour votre navigateur</p>
+      </div>
+    </header>
+
+    <section class="qs-card">
+      <h2>Surveillance</h2>
+
+      <label class="qs-switch">
+        <input type="checkbox" id="protect-enabled" />
+        <span class="qs-switch-track" aria-hidden="true"></span>
+        <span>
+          <strong>Analyser les sites que je visite</strong>
+          <small>Chaque page est comparee au referentiel de marques et aux signaux de phishing. Le site analyse n est jamais contacte.</small>
+        </span>
+      </label>
+
+      <div class="qs-field">
+        <label for="threshold">
+          Seuil d alerte <output id="threshold-value">60</output>/100
+        </label>
+        <input type="range" id="threshold" min="30" max="90" step="5" value="60" />
+        <small>En dessous du seuil, une page suspecte affiche un badge ambre « ? ». Un site signale phishing declenche toujours l alerte rouge.</small>
+      </div>
+
+      <label class="qs-switch">
+        <input type="checkbox" id="notify-phishing" />
+        <span class="qs-switch-track" aria-hidden="true"></span>
+        <span>
+          <strong>Notification systeme sur site signale</strong>
+          <small>Alerte immediate avec reprise du rapport complet sur shield.query-intel.com.</small>
+        </span>
+      </label>
+    </section>
+
+    <section class="qs-card">
+      <h2>Licence</h2>
+      <div class="qs-field">
+        <label for="license">Cle de licence <span class="qs-opt">(offre payante)</span></label>
+        <input type="text" id="license" placeholder="QS-…" autocomplete="off" spellcheck="false" />
+        <small>Laissez vide pour l offre gratuite (quota quotidien limite). Votre cle est envoyee via l en-tete <code>x-qs-license</code>, uniquement a shield.query-intel.com.</small>
+      </div>
+      <div id="license-status" class="qs-status" hidden></div>
+    </section>
+
+    <section class="qs-card">
+      <h2>Service</h2>
+      <div class="qs-field">
+        <label for="api-base">Adresse de l API</label>
+        <input type="url" id="api-base" spellcheck="false" />
+      </div>
+      <div id="health-status" class="qs-status" hidden></div>
+      <div class="qs-actions">
+        <button id="save-btn" class="qs-btn qs-btn-primary">Enregistrer</button>
+        <button id="test-btn" class="qs-btn qs-btn-ghost">Tester la connexion</button>
+        <button id="clear-cache-btn" class="qs-btn qs-btn-ghost">Vider le cache local</button>
+      </div>
+    </section>
+
+    <p class="qs-foot">
+      QueryShield ne conserve aucun message analyse. Seuls score, verdict et resume
+      sont stockes localement pour l historique et le cache de navigation.
+    </p>
+  </main>
+
+  <script src="../shared/api.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

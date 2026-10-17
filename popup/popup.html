@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QueryShield</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="qs-head">
+    <div class="qs-brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z"
+              fill="none" stroke="#00f2fe" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="m8.5 12 2.4 2.4L15.5 10" fill="none" stroke="#00f2fe" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <strong>QueryShield</strong>
+        <span class="qs-sub">moteur heuristique · anti-arnaque</span>
+      </div>
+    </div>
+    <button id="open-options" class="qs-icon-btn" title="Reglages" aria-label="Reglages">
+      <svg viewBox="0 0 24 24" width="16" height="16">
+        <path fill="currentColor" d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L14.9 3h-3.8l-.4 2.6c-.6.3-1.2.6-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.8 1.7 1l.4 2.6h3.8l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/>
+      </svg>
+    </button>
+  </header>
+
+  <nav class="qs-tabs" role="tablist">
+    <button class="qs-tab is-active" role="tab" data-tab="message" aria-selected="true">Message</button>
+    <button class="qs-tab" role="tab" data-tab="site" aria-selected="false">Site</button>
+    <span id="protect-state" class="qs-protect" title="Surveillance des sites visites">●</span>
+  </nav>
+
+  <!-- ======================= Onglet Message ======================= -->
+  <section id="tab-message" class="qs-panel">
+    <div class="qs-channels" id="channels" role="group" aria-label="Canal">
+      <button class="qs-chip is-active" data-channel="unknown">Auto</button>
+      <button class="qs-chip" data-channel="sms">SMS</button>
+      <button class="qs-chip" data-channel="email">E-mail</button>
+      <button class="qs-chip" data-channel="messaging">Messagerie</button>
+    </div>
+    <textarea id="message-input" class="qs-textarea" rows="7"
+      placeholder="Collez ici le SMS, l'e-mail ou le message suspect…"></textarea>
+    <div class="qs-row">
+      <span id="char-count" class="qs-counter">0 / 20000</span>
+      <button id="analyze-btn" class="qs-btn qs-btn-primary">Analyser le message</button>
+    </div>
+  </section>
+
+  <!-- ======================= Onglet Site ======================= -->
+  <section id="tab-site" class="qs-panel" hidden>
+    <label class="qs-label" for="site-input">Adresse a verifier</label>
+    <input id="site-input" class="qs-input" type="text" spellcheck="false"
+      placeholder="exemple.com ou https://exemple.com/page" />
+    <button id="audit-page-btn" class="qs-btn qs-btn-ghost qs-btn-block">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 4a6 6 0 1 1-6 6 6 6 0 0 1 6-6Zm0 3a1 1 0 1 0 1 1 1 1 0 0 0-1-1Z"/></svg>
+      Auditer cette page
+    </button>
+    <button id="check-site-btn" class="qs-btn qs-btn-primary qs-btn-block">Verifier ce domaine</button>
+    <p class="qs-note">Le site n'est jamais ouvert : seules des metadonnees publiques sont analysees.</p>
+  </section>
+
+  <!-- ======================= Erreur ======================= -->
+  <div id="error-box" class="qs-error" hidden></div>
+
+  <!-- ======================= Chargement ======================= -->
+  <div id="loading-box" class="qs-loading" hidden>
+    <span class="qs-spinner"></span>
+    <span id="loading-text">Analyse en cours…</span>
+  </div>
+
+  <!-- ======================= Resultat ======================= -->
+  <section id="result" class="qs-result" hidden>
+    <div class="qs-score-block">
+      <svg viewBox="0 0 120 120" class="qs-ring" width="84" height="84">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#1e2330" stroke-width="9"/>
+        <circle id="ring-arc" cx="60" cy="60" r="52" fill="none" stroke="#00f2fe" stroke-width="9"
+                stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"
+                transform="rotate(-90 60 60)"/>
+        <text id="ring-score" x="60" y="58" text-anchor="middle" class="qs-ring-num">0</text>
+        <text x="60" y="74" text-anchor="middle" class="qs-ring-cap">score /100</text>
+      </svg>
+      <div class="qs-verdict-col">
+        <span id="verdict-badge" class="qs-verdict">—</span>
+        <p id="result-summary" class="qs-summary"></p>
+      </div>
+    </div>
+    <div id="findings" class="qs-findings"></div>
+    <div id="recommendations" class="qs-recos"></div>
+    <div id="result-meta" class="qs-meta"></div>
+  </section>
+
+  <!-- ======================= Historique / quota ======================= -->
+  <footer class="qs-foot">
+    <div id="quota-line" class="qs-quota" hidden></div>
+    <div id="history" class="qs-history"></div>
+  </footer>
+
+  <script src="../shared/api.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
