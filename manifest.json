@@ -38,7 +38,10 @@
       "128": "icons/icon128.png"
     }
   },
-  "options_page": "options/options.html",
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
   "web_accessible_resources": [
     {
       "resources": ["blocked/blocked.html", "blocked/blocked.js", "icons/icon128.png"],

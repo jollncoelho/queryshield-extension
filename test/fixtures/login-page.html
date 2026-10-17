@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Espace client — test fixture</title>
+</head>
+<body>
+  <h1>Espace client</h1>
+  <form action="/login" method="post">
+    <input type="text" name="email" placeholder="Identifiant" />
+    <input type="password" name="password" placeholder="Mot de passe" />
+    <input type="hidden" name="csrf" value="abc" />
+    <button type="submit">Se connecter</button>
+  </form>
+  <iframe src="https://example.com/embed"></iframe>
+  <img src="http://127.0.0.1:1/tracker.gif" alt="" />
+</body>
+</html>

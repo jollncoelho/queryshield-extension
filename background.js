@@ -478,6 +478,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      case 'clear-bypass': {
+        const hosts = await readJson(BYPASS_KEY, []);
+        await chrome.storage.local.remove(BYPASS_KEY);
+        sessionBypass.clear();
+        if (DNR_AVAILABLE && hosts.length) {
+          try {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+              removeRuleIds: hosts.map(ruleIdFor),
+            });
+          } catch {
+            /* regles deja absentes */
+          }
+        }
+        sendResponse({ cleared: hosts.length });
+        return;
+      }
+
       case 'go-back': {
         try {
           await chrome.tabs.goBack(message.tabId);
