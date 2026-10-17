@@ -268,59 +268,77 @@ async function testDomainUtils() {
  * Garde-fou contre le bug de persistance signale par l utilisateur :
  * la page d options reference des champs absents du HTML, ce qui faisait
  * planter load() ET save() sur `null.checked` -> plus aucun reglage
- * n'etait enregistre. On verifie donc que le couple HTML/JS est coherent.
+ * n'etait enregistre. On verifie donc que chaque couple HTML/JS est coherent.
  */
-async function testOptionsContract() {
-  console.log('\n[page d options : contrat HTML/JS]');
+async function testPageContract(dir, script, options) {
+  const label = dir;
+  console.log('\n[' + label + ' : contrat HTML/JS]');
 
-  const html = readFileSync(join(ROOT, 'options/options.html'), 'utf8');
-  const js = readFileSync(join(ROOT, 'options/options.js'), 'utf8');
-  const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
+  const html = readFileSync(join(ROOT, dir, dir + '.html'), 'utf8');
+  const js = readFileSync(join(ROOT, dir, script), 'utf8');
 
-  // Chaque identifiant demande par options.js existe dans le HTML.
-  const wanted = [...js.matchAll(/\$\('([a-z0-9-]+)'\)/g)].map((m) => m[1]);
-  assert(wanted.length > 0, 'options : le JS reference des champs');
+  // Chaque identifiant demande par le JS existe dans le HTML.
+  const wanted = [...new Set([
+    ...js.matchAll(/getElementById\('([a-z0-9-]+)'\)/g),
+    ...js.matchAll(/getElementById\("([a-z0-9-]+)"\)/g),
+    ...js.matchAll(/\$\('([a-z0-9-]+)'\)/g),
+  ].map((m) => m[1]))];
+  assert(wanted.length > 0, label + ' : le JS reference des champs');
   const missing = wanted.filter((id) => !html.includes(`id="${id}"`));
   assert(missing.length === 0,
-    'options : aucun champ manquant dans le HTML' + (missing.length ? ' — ' + missing.join(', ') : ''));
+    label + ' : aucun champ manquant dans le HTML' + (missing.length ? ' — ' + missing.join(', ') : ''));
 
-  // Les champs presentes par le HTML doivent tous etre pilotes par le JS.
-  const inHtml = [...html.matchAll(/id="([a-z0-9-]+)"/g)].map((m) => m[1]).filter((id) =>
-    ['protect-enabled', 'block-mode', 'network-checks', 'notify-phishing', 'threshold',
-     'block-threshold', 'license', 'api-base', 'save-btn', 'test-btn',
-     'clear-cache-btn', 'clear-bypass-btn', 'health-status', 'license-status'].includes(id));
-  const undriven = inHtml.filter((id) => !wanted.includes(id) && !js.includes(`'${id}'`));
+  // Les champs du HTML critiques doivent tous etre pilotes par le JS.
+  const critical = (options && options.critical) || [];
+  const undriven = critical.filter((id) => !wanted.includes(id) && !js.includes(`'${id}'`));
   assert(undriven.length === 0,
-    'options : tous les champs du HTML sont pilotes' + (undriven.length ? ' — ' + undriven.join(', ') : ''));
-
-  // La page options doit etre declaree dans le manifeste.
-  assert(!!(manifest.options_ui && /options\/options\.html$/.test(manifest.options_ui.page)),
-    'options : page declaree dans manifest.options_ui');
+    label + ' : tous les champs critiques sont pilotes' + (undriven.length ? ' — ' + undriven.join(', ') : ''));
 
   // Simulation reelle : chargement des deux fichiers dans jsdom.
-  const { window } = new JSDOM(html, { runScripts: 'outside-only', url: 'chrome-extension://test/options/options.html' });
+  const { window } = new JSDOM(html, {
+    runScripts: 'outside-only',
+    url: 'chrome-extension://test/' + dir + '/' + dir + '.html',
+  });
   const errors = [];
   window.addEventListener('error', (e) => errors.push(e.message));
-  const api = readFileSync(join(ROOT, 'shared/api.js'), 'utf8');
-  window.eval(api);
+  const shared = readFileSync(join(ROOT, 'shared/api.js'), 'utf8');
+  window.eval(shared);
   window.eval(js);
 
-  // Aucun champ requis ne doit etre nul apres evaluation du script.
-  const nulls = [];
-  ['protect-enabled', 'block-mode', 'network-checks', 'notify-phishing',
-   'threshold', 'block-threshold', 'license', 'api-base', 'save-btn'].forEach((id) => {
-    if (!window.document.getElementById(id)) nulls.push(id);
-  });
-  assert(nulls.length === 0, 'options : champs accessibles en jsdom' + (nulls.length ? ' — ' + nulls.join(', ') : ''));
-  assert(errors.length === 0, 'options : aucune erreur JS en jsdom' + (errors.length ? ' — ' + errors[0] : ''));
+  const nulls = wanted.filter((id) => !window.document.getElementById(id));
+  assert(nulls.length === 0, label + ' : champs accessibles en jsdom' + (nulls.length ? ' — ' + nulls.join(', ') : ''));
+  assert(errors.length === 0, label + ' : aucune erreur JS en jsdom' + (errors.length ? ' — ' + errors[0] : ''));
   window.close();
+}
+
+async function testOptionsContract() {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
+  assert(!!(manifest.options_ui && /options\/options\.html$/.test(manifest.options_ui.page)),
+    'manifest : page declaree dans options_ui (objet MV3)');
+  assert(manifest.options_ui.open_in_tab === true,
+    'manifest : options_ui.open_in_tab actif (plein onglet)');
+  assert(!('options_page' in manifest),
+    'manifest : cle legacy options_page supprimee');
+
+  await testPageContract('options', 'options.js', {
+    critical: ['protect-enabled', 'block-mode', 'network-checks', 'notify-phishing',
+      'threshold', 'block-threshold', 'license', 'api-base', 'save-btn', 'test-btn',
+      'clear-cache-btn', 'clear-bypass-btn', 'health-status', 'license-status'],
+  });
+  await testPageContract('popup', 'popup.js', {
+    critical: ['analyze-btn', 'check-site-btn', 'result', 'verdict-badge',
+      'findings', 'recommendations', 'message-input', 'site-input',
+      'history', 'active-page', 'active-score', 'quota-line', 'error-box'],
+  });
+  await testPageContract('blocked', 'blocked.js', {
+    critical: ['score', 'verdict', 'reasons', 'back-btn', 'bypass-btn'],
+  });
 }
 
 /* ------------------------------------------------------------------ main */
 
 (async () => {
   await testAnalyzeMessage();
-  await testChannelSelection();
   await testChannelSelection();
   await testAuditCurrentPage();
   await testQuotaError();
