@@ -41,7 +41,7 @@ const RESULT = {
     { id: 'info', severity: 'info', title: 'Information ignoree' },
   ],
   recommendations: [{ id: 'r1', text: 'Ne saisissez aucun identifiant.' }],
-  network: { rdap: { domainAgeDays: 4 } },
+  network: { domainAgeDays: 4 },
 };
 
 async function loadBlockedPage(query) {

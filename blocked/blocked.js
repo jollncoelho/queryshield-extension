@@ -58,7 +58,7 @@
 
     // Age du domaine (verifications actives) si disponible.
     const ageBox = document.getElementById('domain-age');
-    const days = result.network && result.network.rdap && result.network.rdap.domainAgeDays;
+    const days = result.network && result.network.domainAgeDays;
     if (days != null) {
       const label = QSApi.domainAgeLabel(days);
       ageBox.hidden = false;
