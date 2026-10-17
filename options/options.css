@@ -1,5 +1,8 @@
 /* QueryShield — styles de la page d options (theme sombre tactique) */
 
+/* Garde-fou : une classe qui impose un `display` ecrase `[hidden]`. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #090a0f;
   --panel: #12151e;

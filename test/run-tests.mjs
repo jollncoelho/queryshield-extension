@@ -320,6 +320,16 @@ async function testOptionsContract() {
   assert(!('options_page' in manifest),
     'manifest : cle legacy options_page supprimee');
 
+  // Garde-fou CSS : une classe qui impose un `display` (ex. `.qs-panel
+  // { display: grid }`) ecrase la regle `[hidden]` du navigateur. C est ce
+  // qui affichait les panneaux Message ET Site empiles dans le popup.
+  // Chaque feuille doit donc neutraliser explicitement [hidden].
+  ['popup/popup.css', 'options/options.css', 'blocked/blocked.css'].forEach((sheet) => {
+    const css = readFileSync(join(ROOT, sheet), 'utf8');
+    assert(/\[hidden\]\s*\{[^}]*display:\s*none\s*!important/.test(css),
+      sheet + ' : regle [hidden] { display: none !important } presente');
+  });
+
   await testPageContract('options', 'options.js', {
     critical: ['protect-enabled', 'block-mode', 'network-checks', 'notify-phishing',
       'threshold', 'block-threshold', 'license', 'api-base', 'save-btn', 'test-btn',

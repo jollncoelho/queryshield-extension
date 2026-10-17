@@ -68,7 +68,10 @@
 
   function setLoading(on, label) {
     els.loadingBox.hidden = !on;
-    if (on && label) els.loadingText.textContent = label;
+    // Le libelle est toujours rafraichi : sinon un texte laisse par une
+    // action precedente (« Analyse en cours… ») s affiche pendant une
+    // verification de domaine et induit en erreur.
+    if (on) els.loadingText.textContent = label || 'Traitement en cours…';
     els.analyzeBtn.disabled = on;
     els.checkSiteBtn.disabled = on;
     els.auditPageBtn.disabled = on;
@@ -198,6 +201,8 @@
       const name = tab.dataset.tab;
       els.panels.message.hidden = name !== 'message';
       els.panels.site.hidden = name !== 'site';
+      // Un message d erreur de l autre onglet n a plus de sens ici.
+      clearError();
     });
   });
 
@@ -328,6 +333,13 @@
       showError('Saisissez une adresse a verifier.');
       return;
     }
+    // Une adresse non analysable (chrome://, fichier local, IP privee, hote
+    // sans point…) doit etre refusee ici, avec un message clair, plutot que
+    // de partir a l API pour revenir en erreur generique.
+    if (!QSApi.isScannableUrl(url)) {
+      showError('Cette adresse ne peut pas etre analysee : utilisez un nom de domaine public (exemple.com).');
+      return;
+    }
     setLoading(true, 'Verification du domaine…');
     try {
       const settings = await QSApi.getSettings();
@@ -438,6 +450,12 @@
   els.auditPageBtn.addEventListener('click', auditCurrentPage);
   els.recheckBtn.addEventListener('click', recheckPage);
   els.openOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  // Des que l utilisateur corrige sa saisie, l erreur affichee n est plus
+  // pertinente : on la retire pour ne pas laisser un message trompeur.
+  [els.messageInput, els.siteInput].forEach((el) => {
+    el.addEventListener('input', clearError);
+  });
 
   (async function init() {
     await renderProtection();

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "QueryShield — Bouclier anti-arnaque",
   "short_name": "QueryShield",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Analyse zero-click des pages, detection des formulaires de harvesting, blocage actif des sites de phishing et console tactique.",
   "permissions": [
     "storage",

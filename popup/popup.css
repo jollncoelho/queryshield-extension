@@ -1,5 +1,11 @@
 /* QueryShield — styles du popup (theme sombre tactique, cyan #00f2fe) */
 
+/* Garde-fou : sans cette regle, toute classe qui impose un `display`
+   (ex. `.qs-panel { display: grid }`) ecrase la regle `[hidden]` du
+   navigateur, et les onglets masques restent visibles. C est ce qui
+   affichait les formulaires Message ET Site empiles en meme temps. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #090a0f;
   --panel: #12151e;

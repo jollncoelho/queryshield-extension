@@ -1,5 +1,8 @@
 /* QueryShield — page de blocage (theme alerte rouge tactique) */
 
+/* Garde-fou : une classe qui impose un `display` ecrase `[hidden]`. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #0a0508;
   --panel: #150a0e;
